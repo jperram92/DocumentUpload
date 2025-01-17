@@ -1,28 +1,28 @@
 import { LightningElement, wire, api, track } from 'lwc';
 import getFiles from '@salesforce/apex/FileController.getFiles';
 import updateFiles from '@salesforce/apex/FileController.updateFiles';
-import addFile from '@salesforce/apex/FileController.addFile';
 import { refreshApex } from '@salesforce/apex';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
 
 export default class FileTable extends LightningElement {
-    @api recordId; // Parent record ID
-    @track files = []; // Holds the file data
-    @track draftValues = []; // Draft values for inline editing
-    wiredFilesResult; // Stores wired result for refresh
+    @api recordId; // The record ID of the parent object
+    @track files = []; // Holds the data for the table
+    @track originalFiles = []; // Backup for filtering and sorting
+    @track draftValues = []; // Holds draft values during inline editing
+    wiredResult; // Stores the wired result for refresh
     sortBy = 'title'; // Default sort column
     sortDirection = 'asc'; // Default sort direction
 
-    // Table column definitions
+    // Define columns
     columns = [
-        { label: 'Title', fieldName: 'Title', type: 'text', editable: true, sortable: true },
-        { label: 'Document Type', fieldName: 'Document_Type__c', type: 'text', editable: true, sortable: true },
-        { label: 'Description', fieldName: 'Description', type: 'text', editable: true, sortable: true },
-        { label: 'Last Modified', fieldName: 'LastModifiedDate', type: 'date', sortable: true },
-        { label: 'Last Modified By', fieldName: 'LastModifiedBy.Name', type: 'text', sortable: true },
+        { label: 'Title', fieldName: 'title', type: 'text', editable: true, sortable: true },
+        { label: 'Document Type', fieldName: 'documentType', type: 'text', editable: true, sortable: true },
+        { label: 'Description', fieldName: 'description', type: 'text', editable: true, sortable: true },
+        { label: 'Last Modified', fieldName: 'lastModified', type: 'date', sortable: true },
+        { label: 'Last Modified By', fieldName: 'lastModifiedBy', type: 'text', sortable: true },
         {
             label: 'File Type',
-            fieldName: 'FileType',
+            fieldName: 'fileType',
             type: 'text',
             sortable: true,
             cellAttributes: {
@@ -30,59 +30,65 @@ export default class FileTable extends LightningElement {
                 iconPosition: 'left',
             },
         },
-        { label: 'Size (KB)', fieldName: 'ContentSize', type: 'number', sortable: true },
+        { label: 'Size (KB)', fieldName: 'size', type: 'number', sortable: true },
         {
             type: 'action',
             typeAttributes: {
                 rowActions: [
                     { label: 'Preview', name: 'preview' },
                     { label: 'Download', name: 'download' },
+                    { label: 'Delete', name: 'delete' },
                 ],
             },
         },
     ];
 
-    // Fetch data from Apex
+    // Fetch data from the Apex controller
     @wire(getFiles, { objectId: '$recordId' })
     wiredFiles(result) {
-        this.wiredFilesResult = result; // Store result for refresh
-        const { data, error } = result;
+        this.wiredResult = result; // Store the result for refresh
+        const { error, data } = result;
 
         if (data) {
-            this.files = data.map((file) => ({
-                ...file,
-                ContentSize: file.ContentSize ? (file.ContentSize / 1024).toFixed(2) : null, // Convert size to KB
-                icon: this.getFileIcon(file.FileType), // Determine file icon
-            }));
+            try {
+                console.log('Files fetched successfully:', data);
+                this.originalFiles = data.map((file) => ({
+                    id: file.id,
+                    title: file.title,
+                    size: (file.size / 1024).toFixed(2), // Convert bytes to KB
+                    lastModified: file.lastModified,
+                    fileType: file.fileType,
+                    description: file.description,
+                    documentType: file.documentType,
+                    lastModifiedBy: file.lastModifiedBy,
+                    icon: this.getFileIcon(file.fileType), // Determine file icon
+                }));
+                this.files = [...this.originalFiles];
+            } catch (error) {
+                console.error('Error processing files:', error);
+                this.showToast('Error', 'An error occurred while processing files.', 'error');
+            }
         } else if (error) {
-            this.showToast('Error', 'Unable to fetch files.', 'error');
             console.error('Error fetching files:', error);
+            this.showToast('Error', 'Unable to fetch files. Please try again.', 'error');
         }
     }
 
-    // Handle inline edit save
+    // Handle inline editing save
     handleSave(event) {
-        const draftValues = event.detail.draftValues;
-        console.log('Draft Values:', draftValues);
+        const updatedFields = event.detail.draftValues;
+        console.log('Draft values to save:', updatedFields);
 
-        updateFiles({ updatedFiles: draftValues })
-            .then((result) => {
-                console.log('Update Result:', result);
+        if (!updatedFields || updatedFields.length === 0) {
+            this.showToast('Warning', 'No changes detected to save.', 'warning');
+            return;
+        }
 
-                const { successIds, errors } = result;
-                if (successIds.length > 0) {
-                    this.showToast('Success', `${successIds.length} file(s) updated successfully.`, 'success');
-                }
-
-                if (Object.keys(errors).length > 0) {
-                    const errorMessages = Object.entries(errors)
-                        .map(([id, message]) => `File ID ${id}: ${message}`)
-                        .join(', ');
-                    this.showToast('Warning', `Some updates failed: ${errorMessages}`, 'warning');
-                }
-
-                this.draftValues = [];
-                return refreshApex(this.wiredFilesResult);
+        updateFiles({ updatedFiles: updatedFields })
+            .then(() => {
+                this.draftValues = []; // Clear draft values after successful update
+                this.showToast('Success', 'Files updated successfully.', 'success');
+                return refreshApex(this.wiredResult); // Refresh data
             })
             .catch((error) => {
                 console.error('Error updating files:', error);
@@ -90,46 +96,98 @@ export default class FileTable extends LightningElement {
             });
     }
 
-    // Add a file and refresh
-    handleAddFile() {
-        addFile({ recordId: this.recordId })
-            .then(() => {
-                this.showToast('Success', 'File added successfully.', 'success');
-                return refreshApex(this.wiredFilesResult);
-            })
-            .catch((error) => {
-                console.error('Error adding file:', error);
-                this.showToast('Error', 'Unable to add file. Please try again.', 'error');
-            });
+    // Handle search functionality
+    handleSearch(event) {
+        const searchKey = event.target.value.toLowerCase();
+        console.log('Search Key:', searchKey);
+
+        try {
+            if (this.originalFiles && this.originalFiles.length > 0) {
+                this.files = this.originalFiles.filter((file) =>
+                    file.title.toLowerCase().includes(searchKey)
+                );
+            }
+        } catch (error) {
+            console.error('Error during search:', error);
+            this.showToast('Error', 'An error occurred during search. Please try again.', 'error');
+        }
     }
 
-    // Handle row actions
+    // Handle column sorting
+    updateColumnSorting(event) {
+        try {
+            this.sortBy = event.detail.fieldName;
+            this.sortDirection = event.detail.sortDirection;
+            this.files = [...this.sortData(this.files, this.sortBy, this.sortDirection)];
+        } catch (error) {
+            console.error('Error sorting columns:', error);
+            this.showToast('Error', 'Unable to sort columns. Please try again.', 'error');
+        }
+    }
+
+    // Sort data based on column and direction
+    sortData(data, fieldName, sortDirection) {
+        const parseData = [...data];
+        const key = (a) => a[fieldName];
+
+        parseData.sort((a, b) => {
+            const aVal = key(a) || '';
+            const bVal = key(b) || '';
+            return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
+        });
+
+        return sortDirection === 'asc' ? parseData : parseData.reverse();
+    }
+
+    handlePreview(row) {
+        const fileId = row.id; // Use the ContentDocumentId
+        if (!fileId) {
+            this.showToast('Error', 'File ID is missing. Unable to preview.', 'error');
+            return;
+        }
+    
+        const previewUrl = `/sfc/servlet.shepherd/document/download/${fileId}`;
+        window.open(previewUrl, '_blank'); // Open in a new tab
+        this.showToast('Success', 'Preview opened in a new tab.', 'success');
+    }
+
+    // Handle row-level actions (Preview, Download, Delete)
     handleRowAction(event) {
         const actionName = event.detail.action.name;
         const row = event.detail.row;
 
-        if (actionName === 'preview') {
-            this.handlePreview(row.Id);
-        } else if (actionName === 'download') {
-            this.handleDownload(row.Id);
-        } else {
-            console.warn(`Action "${actionName}" is not implemented.`);
+        try {
+            switch (actionName) {
+                case 'preview':
+                    console.log('Preview file:', row);
+                    this.handlePreview(row); // Call handlePreview
+                    //this.showToast('Info', 'Preview functionality is not yet implemented.', 'info');
+                    break;
+                case 'download':
+                    console.log('Download file:', row);
+                    this.showToast('Info', 'Download functionality is not yet implemented.', 'info');
+                    break;
+                case 'delete':
+                    console.log('Delete file:', row);
+                    this.handleDelete(row);
+                    break;
+                default:
+                    console.error('Unknown action:', actionName);
+            }
+        } catch (error) {
+            console.error('Error handling row action:', error);
+            this.showToast('Error', `An error occurred while handling ${actionName}.`, 'error');
         }
     }
 
-    // Handle file preview
-    handlePreview(fileId) {
-        const previewUrl = `/sfc/servlet.shepherd/document/download/${fileId}`;
-        window.open(previewUrl, '_blank');
+    // Handle file deletion
+    handleDelete(row) {
+        console.log('Delete file:', row);
+        // Add logic for deletion (e.g., calling an Apex method to delete the file)
+        this.showToast('Info', 'Delete functionality is currently a placeholder.', 'info');
     }
 
-    // Handle file download
-    handleDownload(fileId) {
-        const downloadUrl = `/sfc/servlet.shepherd/document/download/${fileId}`;
-        window.open(downloadUrl, '_self');
-    }
-
-    // File icon determination
+    // Determine file icon based on file type
     getFileIcon(fileType) {
         const icons = {
             PDF: 'doctype:pdf',
@@ -140,14 +198,13 @@ export default class FileTable extends LightningElement {
         return icons[fileType?.toUpperCase()] || 'doctype:unknown';
     }
 
-    // Toast utility
+    // Show toast messages for user feedback
     showToast(title, message, variant) {
-        this.dispatchEvent(
-            new ShowToastEvent({
-                title,
-                message,
-                variant,
-            })
-        );
+        const event = new ShowToastEvent({
+            title,
+            message,
+            variant,
+        });
+        this.dispatchEvent(event);
     }
 }
