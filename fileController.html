@@ -1,0 +1,36 @@
+<template>
+    <lightning-card title="Files" icon-name="doctype:attachment">
+        <!-- Search Input -->
+        <div class="slds-m-around_medium">
+            <lightning-input
+                type="search"
+                label="Search Files"
+                placeholder="Search by title"
+                onchange={handleSearch}
+                aria-label="Search files by title"
+            ></lightning-input>
+        </div>
+
+        <!-- Datatable -->
+        <template if:true={files}>
+            <lightning-spinner if:true={isLoading}></lightning-spinner>
+            <lightning-datatable
+                key-field="id"
+                data={files}
+                columns={columns}
+                draft-values={draftValues}
+                onsort={updateColumnSorting}
+                onsave={handleSave}
+                onrowaction={handleRowAction}
+                hide-checkbox-column
+            ></lightning-datatable>
+        </template>
+
+        <!-- No Data Message -->
+        <template if:false={files}>
+            <p class="slds-text-body_small slds-m-around_medium">
+                No files found for this record.
+            </p>
+        </template>
+    </lightning-card>
+</template>
