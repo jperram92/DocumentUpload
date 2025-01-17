@@ -7,13 +7,11 @@
                 label="Search Files"
                 placeholder="Search by title"
                 onchange={handleSearch}
-                aria-label="Search files by title"
             ></lightning-input>
         </div>
 
         <!-- Datatable -->
         <template if:true={files}>
-            <lightning-spinner if:true={isLoading}></lightning-spinner>
             <lightning-datatable
                 key-field="id"
                 data={files}
